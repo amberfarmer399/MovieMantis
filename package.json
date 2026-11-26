@@ -1,0 +1,15 @@
+{
+  "name": "moviemantis",
+  "version": "1.0.0",
+  "description": "MovieMantis — Full-stack Movie Discovery, Watchlists & Recommendation Ranking Application backed by MongoDB schemas and ESR indexes",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "mongosh \"mongodb://localhost:27017/moviemantis\" schema.mongodb.js && mongosh \"mongodb://localhost:27017/moviemantis\" queries.mongodb.js",
+    "test": "node --test test/app.test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "mongodb": "^6.13.0"
+  }
+}

@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- MANDATORY: Declare support for both light and dark themes -->
+  <meta name="color-scheme" content="light dark">
+  <title>MovieMantis — Movie Discovery, Watchlists &amp; Recommendation Ranking</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top-bar">
+    <div class="brand-cluster">
+      <span class="brand-logo" aria-hidden="true">🎬</span>
+      <div>
+        <h1 class="brand-title">MovieMantis</h1>
+        <p class="brand-subtitle">MongoDB ESR-Indexed Discovery, Extended-Reference Watchlists &amp; Recommendation Ranking</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <div class="stat-pill" id="statCatalogCount">Catalog: <strong>--</strong></div>
+      <div class="stat-pill" id="statWatchlistCount">Watchlist: <strong>--</strong></div>
+      <button type="button" class="btn btn-primary" id="openAddMovieBtn">+ Add Movie to Catalog</button>
+    </div>
+  </header>
+
+  <nav class="tab-nav" aria-label="Primary sections">
+    <button type="button" class="tab-btn active" data-tab="discover">
+      1. Discover &amp; Filter Catalog
+      <span class="badge-code">idx_movies_discovery_esr</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="watchlist">
+      2. My Ranked Watchlist
+      <span class="badge-code">idx_watchlists_user_status_ranking</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="recommendations">
+      3. Personalized Recommendations
+      <span class="badge-code">Affinity Engine</span>
+    </button>
+    <button type="button" class="tab-btn" data-tab="diagnostics">
+      4. MongoDB Schema &amp; Index Inspector
+      <span class="badge-code">Live Explain Plan</span>
+    </button>
+  </nav>
+
+  <main class="main-container">
+    <!-- TAB 1: DISCOVER & FILTER CATALOG -->
+    <section id="tab-discover" class="tab-panel active" aria-label="Movie Discovery Catalog">
+      <aside class="filters-panel">
+        <div class="panel-header">
+          <h2>Discovery Filters (ESR)</h2>
+          <button type="button" class="btn-link" id="resetFiltersBtn">Reset</button>
+        </div>
+
+        <form id="filterForm" class="filter-form">
+          <div class="field">
+            <label for="filterSearch">Title or Synopsis Search</label>
+            <input type="search" id="filterSearch" name="search" placeholder="e.g. Fremen, linguist, multiverse...">
+          </div>
+
+          <div class="field">
+            <label for="filterGenre">Genre <span class="esr-tag">Equality (E)</span></label>
+            <select id="filterGenre" name="genre">
+              <option value="ALL">All Genres</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="filterRating">MPAA Content Rating <span class="esr-tag">Equality (E)</span></label>
+            <select id="filterRating" name="contentRating">
+              <option value="ALL">All Ratings</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="filterProvider">Streaming Provider</label>
+            <select id="filterProvider" name="provider">
+              <option value="ALL">All Platforms</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="filterSort">Ranking Sort <span class="esr-tag">Sort (S)</span></label>
+            <select id="filterSort" name="sortBy">
+              <option value="recommendationScore">Recommendation Score (Desc)</option>
+              <option value="popularityScore">Popularity Velocity (Desc)</option>
+              <option value="avgRating">Bayesian User Rating (Desc)</option>
+              <option value="releaseYear">Release Year (Newest First)</option>
+            </select>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label for="filterMinYear">Min Year <span class="esr-tag">Range (R)</span></label>
+              <input type="number" id="filterMinYear" name="minYear" min="1888" max="2100" value="2010">
+            </div>
+            <div class="field">
+              <label for="filterMaxYear">Max Year <span class="esr-tag">Range (R)</span></label>
+              <input type="number" id="filterMaxYear" name="maxYear" min="1888" max="2100" value="2026">
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="filterRuntime">Max Runtime: <strong id="runtimeValueLabel">240 min</strong></label>
+            <input type="range" id="filterRuntime" name="maxRuntime" min="60" max="240" step="10" value="240">
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-block">Apply Discovery Query</button>
+        </form>
+
+        <div class="live-telemetry-box" id="discoveryTelemetry">
+          <h3>Live Query Telemetry</h3>
+          <div class="telemetry-grid">
+            <div><span>Winning Stage:</span> <code id="diagMoviesStage">--</code></div>
+            <div><span>Index Used:</span> <code id="diagMoviesIndex">--</code></div>
+            <div><span>Keys Examined:</span> <strong id="diagMoviesKeys">0</strong></div>
+            <div><span>Docs Returned:</span> <strong id="diagMoviesDocs">0</strong></div>
+          </div>
+        </div>
+      </aside>
+
+      <div class="catalog-content">
+        <div class="section-toolbar">
+          <div>
+            <h2>Ranked Discovery Feed</h2>
+            <p class="text-muted" id="catalogResultSummary">Loading catalog...</p>
+          </div>
+        </div>
+        <div id="moviesGrid" class="movies-grid" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <!-- TAB 2: WATCHLIST -->
+    <section id="tab-watchlist" class="tab-panel" aria-label="User Ranked Watchlist" hidden>
+      <div class="watchlist-header-bar">
+        <div>
+          <h2>My Personalized Watchlist Queue</h2>
+          <p class="text-muted">
+            Rendered directly from <code>watchlists.movieSnapshot</code> (Extended Reference pattern — <strong>0 <code>$lookup</code> joins</strong>) and ordered by <code>idx_watchlists_user_status_ranking</code>.
+          </p>
+        </div>
+
+        <div class="watchlist-controls">
+          <label for="watchlistStatusFilter">
+            Status <span class="esr-tag">Equality (E)</span>
+            <select id="watchlistStatusFilter">
+              <option value="ALL">All Statuses</option>
+              <option value="WANT_TO_WATCH" selected>WANT_TO_WATCH</option>
+              <option value="WATCHING">WATCHING</option>
+              <option value="WATCHED">WATCHED</option>
+              <option value="DROPPED">DROPPED</option>
+            </select>
+          </label>
+
+          <label for="watchlistSortFilter">
+            Order <span class="esr-tag">Sort (S)</span>
+            <select id="watchlistSortFilter">
+              <option value="affinity">Affinity Score &amp; Priority Rank (Desc)</option>
+              <option value="recent">Recently Added</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="live-telemetry-strip" id="watchlistTelemetryStrip">
+        <span>Query Plan: <code id="diagWatchlistStage">--</code></span>
+        <span>Index: <code id="diagWatchlistIndex">--</code></span>
+        <span>Keys Examined: <strong id="diagWatchlistKeys">0</strong></span>
+        <span>Docs Examined: <strong id="diagWatchlistDocs">0</strong></span>
+      </div>
+
+      <div id="watchlistGrid" class="watchlist-list"></div>
+    </section>
+
+    <!-- TAB 3: PERSONALIZED RECOMMENDATIONS -->
+    <section id="tab-recommendations" class="tab-panel" aria-label="Personalized Recommendations" hidden>
+      <div class="rec-banner">
+        <div>
+          <h2>Personalized Recommendation Ranking Engine</h2>
+          <p class="text-muted">
+            Combines each movie's global Bayesian <code>metrics.recommendationScore</code> (75% weight) with your personal Watchlist Genre Affinity Vector (25% weight) to surface top unwatched titles.
+          </p>
+        </div>
+        <div class="affinity-pills" id="topGenrePills"></div>
+      </div>
+
+      <div id="recommendationsGrid" class="movies-grid"></div>
+    </section>
+
+    <!-- TAB 4: MONGODB SCHEMA & INDEX INSPECTOR -->
+    <section id="tab-diagnostics" class="tab-panel" aria-label="MongoDB Schema and Index Inspector" hidden>
+      <div class="diagnostics-layout">
+        <article class="diag-card">
+          <h2>1. Active MongoDB Indexes &amp; ESR Trade-offs</h2>
+          <p class="text-muted">Live output from <code>db.movies.indexes()</code> and <code>db.watchlists.indexes()</code>:</p>
+          <pre id="activeIndexesPre" class="code-block">Loading indexes...</pre>
+        </article>
+
+        <article class="diag-card">
+          <h2>2. Live Query <code>explain("executionStats")</code> Inspector</h2>
+          <p class="text-muted">Compare the last executed Discovery and Watchlist query execution plans:</p>
+          <div class="dual-code">
+            <div>
+              <h3>Last <code>movies</code> Query Plan</h3>
+              <pre id="moviesExplainPre" class="code-block">Run a discovery query first.</pre>
+            </div>
+            <div>
+              <h3>Last <code>watchlists</code> Query Plan</h3>
+              <pre id="watchlistsExplainPre" class="code-block">Open watchlist tab or filter.</pre>
+            </div>
+          </div>
+        </article>
+
+        <article class="diag-card">
+          <h2>3. Interactive <code>$jsonSchema</code> Validation Tester</h2>
+          <p class="text-muted">
+            Test how MongoDB's strict <code>$jsonSchema</code> validator rejects malformed documents (e.g., invalid releaseYear, bad genre enum, or out-of-range recommendationScore).
+          </p>
+          <div class="validator-actions">
+            <button type="button" class="btn btn-secondary" id="testInvalidMovieBtn">
+              Test Invalid Movie Insert (Bad Genre &amp; Year 1750)
+            </button>
+            <button type="button" class="btn btn-secondary" id="testInvalidWatchlistBtn">
+              Test Invalid Watchlist Insert (Missing movieSnapshot &amp; Priority 99)
+            </button>
+          </div>
+          <pre id="validationTestOutput" class="code-block">Click a test button above to trigger live MongoDB $jsonSchema validation.</pre>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL 1: ADD MOVIE TO CATALOG (Native <dialog> with closedby="any" and :user-invalid validation) -->
+  <!-- MANDATORY: no role="dialog" or aria-modal; the native modal already provides them -->
+  <dialog id="addMovieDialog" closedby="any" aria-labelledby="addMovieDialogTitle">
+    <div class="dialog-header">
+      <h1 id="addMovieDialogTitle">Add New Movie to Catalog</h1>
+      <button type="button" class="btn-icon" id="closeAddMovieDialogBtn" aria-label="Close modal">✕</button>
+    </div>
+
+    <form id="addMovieForm" novalidate>
+      <div class="field">
+        <label for="movieTitleInput">Movie Title</label>
+        <span id="title-hint" class="hint">Required: 1 to 250 characters</span>
+        <input
+          type="text"
+          id="movieTitleInput"
+          name="title"
+          required
+          minlength="1"
+          maxlength="250"
+          aria-describedby="title-hint"
+          data-error="title-error"
+          placeholder="e.g. Past Lives"
+          autofocus
+        >
+        <div id="title-error" class="error-msg">
+          <span role="img" aria-label="Error">❌</span> Please enter a movie title (1–250 characters).
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="movieYearInput">Release Year</label>
+          <span id="year-hint" class="hint">4-digit year (1888–2100)</span>
+          <input
+            type="number"
+            id="movieYearInput"
+            name="releaseYear"
+            required
+            min="1888"
+            max="2100"
+            value="2024"
+            aria-describedby="year-hint"
+            data-error="year-error"
+          >
+          <div id="year-error" class="error-msg">
+            <span role="img" aria-label="Error">❌</span> Enter a release year between 1888 and 2100.
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="movieRuntimeInput">Runtime (Minutes)</label>
+          <span id="runtime-hint" class="hint">Duration (1–1440 min)</span>
+          <input
+            type="number"
+            id="movieRuntimeInput"
+            name="runtimeMinutes"
+            required
+            min="1"
+            max="1440"
+            value="125"
+            aria-describedby="runtime-hint"
+            data-error="runtime-error"
+          >
+          <div id="runtime-error" class="error-msg">
+            <span role="img" aria-label="Error">❌</span> Enter a runtime between 1 and 1440 minutes.
+          </div>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="movieRatingInput">Content Rating</label>
+          <select id="movieRatingInput" name="contentRating" required>
+            <option value="PG-13">PG-13</option>
+            <option value="R">R</option>
+            <option value="PG">PG</option>
+            <option value="G">G</option>
+            <option value="NC-17">NC-17</option>
+            <option value="NR">NR</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="movieAvgRatingInput">Initial Avg Rating (0–10)</label>
+          <span id="avgrating-hint" class="hint">Score between 0.0 and 10.0</span>
+          <input
+            type="number"
+            id="movieAvgRatingInput"
+            name="avgRating"
+            required
+            min="0"
+            max="10"
+            step="0.1"
+            value="8.4"
+            aria-describedby="avgrating-hint"
+            data-error="avgrating-error"
+          >
+          <div id="avgrating-error" class="error-msg">
+            <span role="img" aria-label="Error">❌</span> Enter an average rating between 0.0 and 10.0.
+          </div>
+        </div>
+      </div>
+
+      <fieldset class="checkbox-fieldset">
+        <legend>Genres (Select at least 1)</legend>
+        <div id="addMovieGenresList" class="checkbox-grid"></div>
+      </fieldset>
+
+      <fieldset class="checkbox-fieldset">
+        <legend>Streaming Providers</legend>
+        <div id="addMovieProvidersList" class="checkbox-grid"></div>
+      </fieldset>
+
+      <div class="field">
+        <label for="moviePosterInput">Poster URL</label>
+        <span id="poster-hint" class="hint">Format: https://example.com/poster.jpg</span>
+        <input
+          type="url"
+          id="moviePosterInput"
+          name="posterUrl"
+          required
+          pattern="https?://.+"
+          value="https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?auto=format&fit=crop&w=600&q=80"
+          aria-describedby="poster-hint"
+          data-error="poster-error"
+        >
+        <div id="poster-error" class="error-msg">
+          <span role="img" aria-label="Error">❌</span> Enter a valid URL starting with http:// or https://.
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="movieSynopsisInput">Synopsis</label>
+        <textarea id="movieSynopsisInput" name="synopsis" rows="3" maxlength="2000" placeholder="Short summary for discovery cards..."></textarea>
+      </div>
+
+      <div id="addMovieServerError" class="server-error-banner" hidden></div>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="cancelAddMovieBtn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Validate &amp; Insert Movie</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- MODAL 2: EDIT WATCHLIST ITEM / EXTENDED REFERENCE SNAPSHOT TEST -->
+  <dialog id="editWatchlistDialog" closedby="any" aria-labelledby="editWatchlistDialogTitle">
+    <div class="dialog-header">
+      <h1 id="editWatchlistDialogTitle">Update Watchlist Entry</h1>
+      <button type="button" class="btn-icon" id="closeEditWatchlistBtn" aria-label="Close modal">✕</button>
+    </div>
+
+    <form id="editWatchlistForm">
+      <input type="hidden" id="editWatchlistId">
+      <p id="editWatchlistMovieName" class="dialog-subtitle"></p>
+
+      <div class="field">
+        <label for="editWatchlistStatus">Watch Status</label>
+        <select id="editWatchlistStatus" name="status" required>
+          <option value="WANT_TO_WATCH">WANT_TO_WATCH</option>
+          <option value="WATCHING">WATCHING</option>
+          <option value="WATCHED">WATCHED</option>
+          <option value="DROPPED">DROPPED</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="editWatchlistPriority">Priority Rank (1 = Lowest, 10 = Highest): <strong id="priorityValLabel">8</strong></label>
+        <input type="range" id="editWatchlistPriority" name="priorityRank" min="1" max="10" value="8">
+      </div>
+
+      <div class="field">
+        <label for="editWatchlistRating">Your Personal Rating (1–10, optional)</label>
+        <span id="userrating-hint" class="hint">Leave blank if not rated yet; rating updates the movie's Bayesian recommendationScore</span>
+        <input
+          type="number"
+          id="editWatchlistRating"
+          name="userRating"
+          min="1"
+          max="10"
+          aria-describedby="userrating-hint"
+          data-error="userrating-error"
+        >
+        <div id="userrating-error" class="error-msg">
+          <span role="img" aria-label="Error">❌</span> Enter an integer rating between 1 and 10.
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="editWatchlistNotes">Personal Notes</label>
+        <textarea id="editWatchlistNotes" name="notes" rows="2" maxlength="500"></textarea>
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-secondary" id="cancelEditWatchlistBtn">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save &amp; Recompute Affinity</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toastBanner" class="toast-banner" role="status" aria-live="polite" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

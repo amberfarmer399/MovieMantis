@@ -1,44 +1,67 @@
-# MovieMantis — MongoDB Schema, Validation & Index Design
+# MovieMantis — Full-Stack Movie Discovery, Watchlists & Recommendation Ranking App
 
-MongoDB data model for **MovieMantis**, a movie discovery application supporting faceted catalog filtering, user watchlists, and recommendation ranking.
-
----
-
-## 1. Files in This Repository
-
-- [`schema.mongodb.js`](./schema.mongodb.js) — Defines the `movies` and `watchlists` collections with strict `$jsonSchema` validation rules, the Extended Reference relationship structure, and ESR-aligned compound indexes.
-- [`queries.mongodb.js`](./queries.mongodb.js) — Inserts validated seed data and runs the target discovery and watchlist ranking queries backed by the indexes.
+A complete full-stack web application and MongoDB data architecture for **MovieMantis**, featuring:
+1. **Faceted Movie Discovery Catalog** backed by an ESR (Equality, Sort, Range) compound multikey index (`idx_movies_discovery_esr`).
+2. **User Watchlist Queue** using the **Extended Reference Pattern** (`watchlists.movieSnapshot`) for zero-`$lookup` rendering and an ESR compound index (`idx_watchlists_user_status_ranking`).
+3. **Personalized Recommendation Ranking Engine** combining Bayesian global recommendation scores with each user's Watchlist Genre Affinity Vector.
+4. **Live MongoDB Schema & Index Inspector** in the UI displaying real-time `explain("executionStats")` query plans and an interactive `$jsonSchema` validation tester.
 
 ---
 
-## 2. Setup & Execution
+## 1. Quick Start & Setup
 
 ### Prerequisites
-- MongoDB `6.0+` or `7.0+` running locally (or an Atlas cluster URI)
-- `mongosh` (MongoDB Shell) installed
+- **Node.js** `18+`
+- **MongoDB** `6.0+` or `7.0+` running locally on `mongodb://localhost:27017` (or set `MONGODB_URI`)
+- `mongosh` (optional, for standalone shell scripts)
 
-### Apply Schemas, Validation, and Indexes
+### Install & Run the Full-Stack Application
 ```bash
-mongosh "mongodb://localhost:27017/moviemantis" schema.mongodb.js
+npm install
+npm start
+```
+Then open **[http://localhost:3000](http://localhost:3000)** in your browser.
+
+On startup, `server.js` automatically:
+- Applies strict `$jsonSchema` validation rules to `movies` and `watchlists`.
+- Creates the ESR compound indexes (`idx_movies_discovery_esr`, `idx_watchlists_user_status_ranking`, and unique index `idx_watchlists_user_movie_unique`).
+- Seeds the 10-movie catalog and sample watchlist items if the database is empty.
+
+### Run Automated End-to-End Tests
+```bash
+npm test
 ```
 
-### Run Sample Data & Verified Queries
+### Run Standalone `mongosh` Schema & Query Scripts
 ```bash
+mongosh "mongodb://localhost:27017/moviemantis" schema.mongodb.js
 mongosh "mongodb://localhost:27017/moviemantis" queries.mongodb.js
 ```
 
 ---
 
-## 3. Entity Schemas & Validation Design
+## 2. Project Structure
+
+- [`server.js`](./server.js) — Express + native MongoDB driver backend, automatic `$jsonSchema` validator & index initializer, Bayesian recommendation scorer, and REST endpoints (`/api/movies`, `/api/watchlists`, `/api/recommendations`, `/api/meta`, `/api/validate-test`).
+- [`public/index.html`](./public/index.html) — Responsive web UI with 4 interactive workspaces: *Discover & Filter Catalog*, *My Ranked Watchlist*, *Personalized Recommendations*, and *MongoDB Schema & Index Inspector*.
+- [`public/styles.css`](./public/styles.css) — Dual light/dark theme (`color-scheme: light dark`, `light-dark()`) with native modal `<dialog>` scroll containment and `:user-invalid` validation feedback.
+- [`public/app.js`](./public/app.js) — Frontend state, live `explain("executionStats")` telemetry inspector, and interactive catalog/watchlist management.
+- [`schema.mongodb.js`](./schema.mongodb.js) — Standalone `mongosh` DDL script for collections, `$jsonSchema` validators, and ESR indexes.
+- [`queries.mongodb.js`](./queries.mongodb.js) — Standalone `mongosh` seed and verification script for the two target queries.
+- [`test/app.test.js`](./test/app.test.js) — Automated Node test suite verifying index selection (`winningPlan`), `$jsonSchema` validation rejection (`code: 121`), Extended Reference snapshot creation, and personalized recommendation ranking.
+
+---
+
+## 3. Entity Schemas & `$jsonSchema` Validation
 
 ### Entity 1: `movies` (Discovery Catalog & Ranking Signals)
-Represents canonical movie metadata, filterable discovery attributes, and precomputed ranking signals.
+Represents canonical movie metadata, filterable discovery facets, and precomputed ranking signals.
 - **Core Fields**: `title`, `slug`, `synopsis`, `releaseYear`, `runtimeMinutes`, `contentRating`, `genres`, `languages`, `streamingProviders`, `posterUrl`.
 - **Ranking Subdocument (`metrics`)**:
   - `avgRating` (`double`, `0.0–10.0`) — Bayesian-weighted user score.
   - `ratingCount` (`int`, `>= 0`) — Total verified votes.
   - `popularityScore` (`double`, `>= 0.0`) — Time-decayed engagement score.
-  - `recommendationScore` (`double`, `0.0–100.0`) — Global composite recommendation score used to rank discovery feeds.
+  - `recommendationScore` (`double`, `0.0–100.0`) — Composite ranking score combining Bayesian quality (55%), popularity velocity (30%), and release freshness (15%).
 - **Validation (`$jsonSchema`, `strict` / `error`)**:
   - Enforces required fields, `additionalProperties: false`, URL patterns on `posterUrl`, slug regex (`^[a-z0-9]+(-[a-z0-9]+)*$`), bounded integer ranges on `releaseYear` (`1888–2100`) and `runtimeMinutes` (`1–1440`), and controlled `enum` values for `contentRating`, `genres`, and `streamingProviders`.
 
@@ -52,7 +75,7 @@ Represents a user's saved movie entry, lifecycle status, and personalized recomm
 
 ## 4. Relationship Strategy: Extended Reference Pattern
 
-`movies` and `watchlists` have a **1-to-Many** relationship (one movie appears on many users' watchlists; one user has many watchlist items). We use the **Extended Reference Pattern**:
+`movies` and `watchlists` have a **1-to-Many** relationship (one movie appears on many users' watchlists; one user has many watchlist items). We implement the **Extended Reference Pattern**:
 
 1. **Foreign Key Reference (`watchlists.movieId -> movies._id`)**:
    - Each watchlist entry is a standalone document in `watchlists` referencing `movies._id` via `movieId` (`ObjectId`) and the user via `userId` (`ObjectId`).
@@ -61,7 +84,7 @@ Represents a user's saved movie entry, lifecycle status, and personalized recomm
 2. **Embedded Read Snapshot (`watchlists.movieSnapshot`)**:
    - Copies only the high-read, rarely changing card display fields (`title`, `releaseYear`, `runtimeMinutes`, `genres`, `posterUrl`) directly into the `watchlists` document.
    - **Benefit**: Rendering a user's watchlist screen or "What to Watch Tonight" recommendation queue executes as a single collection read on `watchlists` with **zero `$lookup` joins**.
-   - **Trade-off**: Slight storage duplication (~150 bytes per watchlist entry). If a movie's `title` or `posterUrl` is corrected in `movies`, an asynchronous background job updates matching `watchlists.movieSnapshot` documents by `movieId`.
+   - **Synchronization**: When a movie's `title` or `posterUrl` is updated via `PATCH /api/movies/:id`, the server automatically propagates the update to matching `watchlists.movieSnapshot` documents by `movieId`.
 
 ---
 
